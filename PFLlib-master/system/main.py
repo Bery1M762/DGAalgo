@@ -50,6 +50,7 @@ from flcore.servers.serverlc import FedLC
 from flcore.servers.serveras import FedAS
 from flcore.servers.servercross import FedCross
 from flcore.servers.serverlkm import FedLKM
+from flcore.servers.serverdgamix import DGAPGM
 
 from flcore.trainmodel.models import *
 
@@ -58,6 +59,7 @@ from flcore.trainmodel.resnet import *
 from flcore.trainmodel.alexnet import *
 from flcore.trainmodel.mobilenet_v2 import *
 from flcore.trainmodel.transformer import *
+from flcore.trainmodel.dga_cnn import DGACNN
 
 from utils.result_utils import average_data
 from utils.mem_utils import MemReporter
@@ -193,6 +195,9 @@ def run(args):
             elif args.dataset == 'PAMAP2':
                 args.model = HARCNN(9, dim_hidden=3712, num_classes=args.num_classes, conv_kernel_size=(1, 9), 
                                     pool_kernel_size=(1, 2)).to(args.device)
+
+        elif model_str == "DGACNN":
+            args.model = DGACNN(num_classes=args.num_classes, feature_dim=args.feature_dim).to(args.device)
 
         else:
             raise NotImplementedError
@@ -388,6 +393,11 @@ def run(args):
         elif args.algorithm == "FedCross":
             server = FedCross(args, i)
 
+        elif args.algorithm == "DGAPGM":
+            if model_str != "DGACNN":
+                raise ValueError("DGAPGM requires -m DGACNN, which returns logits and embeddings")
+            server = DGAPGM(args, i)
+
         else:
             raise NotImplementedError
 
@@ -533,6 +543,18 @@ if __name__ == "__main__":
     # 仿真数据噪声强度：越大扰动越强、更多样，但更可能偏离真实分布。
     parser.add_argument('-lkmseed', "--lkm_seed", type=int, default=42,
                         help="Random seed for FedLKM synthetic generation")
+    # DGAPGM: prototype-only DGA federated learning.
+    parser.add_argument('--lambda_mpc', type=float, default=1.0)
+    parser.add_argument('--lambda_pgm', type=float, default=1.0)
+    parser.add_argument('--pgm_mu', type=float, default=1.0)
+    parser.add_argument('--proto_beta', type=float, default=5.0)
+    parser.add_argument('--proto_ema', type=float, default=0.5)
+    parser.add_argument('--margin_eta', type=float, default=0.1)
+    parser.add_argument('--contrast_tau', type=float, default=0.5)
+    parser.add_argument('--mixup_alpha', type=float, default=0.4)
+    parser.add_argument('--pgm_minority_gamma', type=float, default=1.0)
+    parser.add_argument('--use_mpc', type=lambda value: str(value).lower() == 'true', default=True)
+    parser.add_argument('--use_pgm', type=lambda value: str(value).lower() == 'true', default=True)
     # 仿真数据随机种子：固定该值可复现实验结果。
 
 

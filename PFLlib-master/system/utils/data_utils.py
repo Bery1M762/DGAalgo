@@ -39,6 +39,10 @@ def read_client_data(dataset, idx, is_train=True, few_shot=0):
 def process_image(data):
     X = torch.Tensor(data['x']).type(torch.float32)
     y = torch.Tensor(data['y']).type(torch.int64)
+    # DGA-RGB optionally preserves the original five gas values for gas-space mixup.
+    if 'g' in data:
+        g = torch.Tensor(data['g']).type(torch.float32)
+        return [(x, label, gas) for x, label, gas in zip(X, y, g)]
     return [(x, y) for x, y in zip(X, y)]
 
 
@@ -55,4 +59,3 @@ def process_Shakespeare(data):
     X = torch.Tensor(data['x']).type(torch.int64)
     y = torch.Tensor(data['y']).type(torch.int64)
     return [(x, y) for x, y in zip(X, y)]
-
