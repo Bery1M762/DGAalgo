@@ -40,7 +40,8 @@ class clientDGAPGM(Client):
     def load_train_data(self, batch_size=None):
         """Keep final small DGA batches; prototype statistics must see every real sample."""
         batch_size = batch_size or self.batch_size
-        data = read_client_data(self.dataset, self.id, is_train=True, few_shot=self.few_shot)
+        data = read_client_data(self.dataset, self.id, is_train=True,
+                                few_shot=self.few_shot, return_gas=True)
         return DataLoader(data, batch_size=batch_size, drop_last=False, shuffle=True)
 
     def _forward(self, x):
@@ -75,14 +76,18 @@ class clientDGAPGM(Client):
                         features, y, self.global_prototypes, self.margin_matrix, self.proto_mask)
                 if self.use_pgm and gas is not None and self.global_prototypes is not None:
                     generated = self.mixup.generate(
-                        gas, y, self.global_prototypes, self.mixup_adjacency, self.mixup_alpha)
+                        gas, y, self.global_prototypes, self.mixup_adjacency,
+                        self.mixup_alpha, self.proto_mask)
                     if generated is not None:
-                        mixed_x, soft_targets, proto_targets = generated
+                        mixed_x, soft_targets, proto_targets, proto_valid_mask = generated
                         mixed_logits, mixed_features = self._forward(mixed_x.to(self.device))
                         pgm_loss = -(soft_targets.to(self.device) * F.log_softmax(mixed_logits, dim=1)).sum(1).mean()
-                        if proto_targets is not None:
+                        # Classification on mixed gases is valid from round zero.
+                        # Prototype regression starts only for pairs with valid global prototypes.
+                        if proto_targets is not None and proto_valid_mask.any():
+                            valid = proto_valid_mask.to(self.device)
                             pgm_loss = pgm_loss + self.pgm_mu * F.mse_loss(
-                                mixed_features, proto_targets.to(self.device))
+                                mixed_features[valid], proto_targets.to(self.device)[valid])
                         loss = loss + self.lambda_pgm * pgm_loss
                 self.optimizer.zero_grad()
                 loss.backward()

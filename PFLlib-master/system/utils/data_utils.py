@@ -16,14 +16,14 @@ def read_data(dataset, idx, is_train=True):
     return data
 
 
-def read_client_data(dataset, idx, is_train=True, few_shot=0):
+def read_client_data(dataset, idx, is_train=True, few_shot=0, return_gas=False):
     data = read_data(dataset, idx, is_train)
     if "News" in dataset:
         data_list = process_text(data)
     elif "Shakespeare" in dataset:
         data_list = process_Shakespeare(data)
     else:
-        data_list = process_image(data)
+        data_list = process_image(data, return_gas=return_gas)
 
     if is_train and few_shot > 0:
         shot_cnt_dict = defaultdict(int)
@@ -36,11 +36,12 @@ def read_client_data(dataset, idx, is_train=True, few_shot=0):
         data_list = data_list_new
     return data_list
 
-def process_image(data):
+def process_image(data, return_gas=False):
     X = torch.Tensor(data['x']).type(torch.float32)
     y = torch.Tensor(data['y']).type(torch.int64)
-    # DGA-RGB optionally preserves the original five gas values for gas-space mixup.
-    if 'g' in data:
+    # Keep the original PFLlib (x, y) contract unless an algorithm explicitly
+    # requests raw gases for DGA gas-space augmentation.
+    if return_gas and 'g' in data:
         g = torch.Tensor(data['g']).type(torch.float32)
         return [(x, label, gas) for x, label, gas in zip(X, y, g)]
     return [(x, y) for x, y in zip(X, y)]

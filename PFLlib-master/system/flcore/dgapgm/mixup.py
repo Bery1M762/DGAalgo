@@ -23,7 +23,7 @@ class PrototypeGuidedGasMixup:
         self.minority_gamma = minority_gamma
         self.eps = eps
 
-    def generate(self, gases, labels, global_prototypes, adjacency, alpha):
+    def generate(self, gases, labels, global_prototypes, adjacency, alpha, proto_mask=None):
         if gases is None or gases.shape[0] < 2:
             return None
         device = gases.device
@@ -34,7 +34,11 @@ class PrototypeGuidedGasMixup:
         if weights.sum() == 0:
             return None
         source_classes = torch.multinomial(weights / weights.sum(), labels.shape[0], replacement=True)
-        mixed_gases, targets, proto_targets = [], [], []
+        if proto_mask is None:
+            proto_mask = torch.zeros(self.num_classes, dtype=torch.bool, device=device)
+        else:
+            proto_mask = proto_mask.to(device).bool()
+        mixed_gases, targets, proto_targets, proto_valid = [], [], [], []
         beta = torch.distributions.Beta(float(alpha), float(alpha))
         for source_class in source_classes.tolist():
             source_indices = torch.where(labels == source_class)[0]
@@ -51,18 +55,32 @@ class PrototypeGuidedGasMixup:
                 ].item())
             target_indices = torch.where(labels == target_class)[0]
             first = source_indices[torch.randint(source_indices.numel(), (1,), device=device)]
-            second = target_indices[torch.randint(target_indices.numel(), (1,), device=device)]
-            if first.item() == second.item() and source_indices.numel() < 2:
+            if target_class == source_class and source_indices.numel() >= 2:
+                # Same-class mixup must use two different samples.
+                available_seconds = source_indices[source_indices != first]
+                second = available_seconds[torch.randint(available_seconds.numel(), (1,), device=device)]
+            else:
+                second = target_indices[torch.randint(target_indices.numel(), (1,), device=device)]
+            if first.item() == second.item():
                 continue
             lam = beta.sample().to(device)
             mixed_gases.append(lam * gases[first] + (1.0 - lam) * gases[second])
             targets.append(lam * F.one_hot(labels[first], self.num_classes).float()
                            + (1.0 - lam) * F.one_hot(labels[second], self.num_classes).float())
-            if global_prototypes is not None:
+            pair_has_prototypes = (global_prototypes is not None
+                                   and bool(proto_mask[labels[first]].item())
+                                   and bool(proto_mask[labels[second]].item()))
+            if pair_has_prototypes:
                 proto_targets.append(lam * global_prototypes[labels[first]]
                                      + (1.0 - lam) * global_prototypes[labels[second]])
+            else:
+                # Preserve batch alignment while making the target unusable for MSE.
+                proto_targets.append(torch.zeros_like(global_prototypes[0]).unsqueeze(0)
+                                     if global_prototypes is not None else torch.empty(0, device=device))
+            proto_valid.append(pair_has_prototypes)
         if not mixed_gases:
             return None
         mixed_gases = torch.cat(mixed_gases, dim=0)
+        proto_targets = torch.cat(proto_targets, dim=0) if global_prototypes is not None else None
         return (gas_to_dga_rgb(mixed_gases, self.eps), torch.cat(targets, dim=0),
-                torch.cat(proto_targets, dim=0) if proto_targets else None)
+                proto_targets, torch.tensor(proto_valid, dtype=torch.bool, device=device))
